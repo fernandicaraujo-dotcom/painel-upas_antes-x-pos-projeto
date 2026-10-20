@@ -347,6 +347,20 @@ if dados["fase"].nunique() < 2:
     st.warning("A seleção atual não inclui dias das duas fases (Antes e Pós). "
                "Escolha um intervalo que comece antes do início do projeto e termine depois.")
 
+st.sidebar.header("UPA")
+portes = sorted(dados["porte"].unique())
+porte_sel = st.sidebar.multiselect("Porte", portes, default=portes)
+dados = dados[dados["porte"].isin(porte_sel)]
+if dados.empty:
+    st.warning("Selecione ao menos um porte.")
+    st.stop()
+
+TODAS = "Todas as UPAs"
+upa_sel = st.sidebar.selectbox("Ver indicadores de", [TODAS] + sorted(dados["upa"].unique()),
+                               help="Os cards e o gráfico mudam conforme a UPA e o período escolhidos.")
+dados_sel = dados if upa_sel == TODAS else dados[dados["upa"] == upa_sel]
+
+
 st.sidebar.header("Critérios de comparação")
 opc_volume = st.sidebar.radio(
     "Indicadores sem meta no contrato (acolhimento, exames, RX, ECG, GAEs abertas/classificadas): aumentar é…",
@@ -356,25 +370,20 @@ opc_volume = st.sidebar.radio(
 sentido_volume = {"Só variação (neutro)": 0, "Melhora": 1, "Piora": -1}[opc_volume]
 limiar = st.sidebar.slider("Variação mínima para considerar mudança (%)", 0.0, 20.0, 5.0, 0.5,
                            help="Variações menores que esse valor aparecem como 'Estável'.")
-portes = sorted(dados["porte"].unique())
-porte_sel = st.sidebar.multiselect("Porte", portes, default=portes)
-dados = dados[dados["porte"].isin(porte_sel)]
-if dados.empty:
-    st.warning("Selecione ao menos um porte.")
-    st.stop()
-
 # ----------------------------------------------------------------------------
 # Cabeçalho
 # ----------------------------------------------------------------------------
-def periodo(fase):
-    d = dados.loc[dados["fase"] == fase, "data"]
+def periodo(df, fase):
+    d = df.loc[df["fase"] == fase, "data"]
     return (d.min(), d.max(), d.nunique()) if not d.empty else (None, None, 0)
 
-a_ini, a_fim, a_dias = periodo("Antes")
-p_ini, p_fim, p_dias = periodo("Pós")
+a_ini, a_fim, a_dias = periodo(dados_sel, "Antes")
+p_ini, p_fim, p_dias = periodo(dados_sel, "Pós")
 f = lambda d: d.strftime("%d/%m/%Y") if d is not None else "—"
 
 logo_a, _, logo_b = st.columns([2, 5, 1.2])
+
+
 def achar_logo(nome):
     """Procura a logo em assets/ ou solta na raiz do repositório."""
     for pasta in (ASSETS, os.path.dirname(os.path.abspath(__file__))):
@@ -395,150 +404,127 @@ st.markdown(
 st.markdown(f"<h1 style='color:{AZUL};margin:0'>Painel UPAs · Antes x Pós-Projeto</h1>", unsafe_allow_html=True)
 st.caption(f"**Antes:** {f(a_ini)} a {f(a_fim)} ({a_dias} dias)  ·  **Pós:** {f(p_ini)} a {f(p_fim)} ({p_dias} dias)  ·  Fonte: {origem}")
 
+comp_sel = comparar(dados_sel, [], sentido_volume, limiar)
 comp_upa = comparar(dados, ["upa", "porte"], sentido_volume, limiar)
-comp_rede = comparar(dados, [], sentido_volume, limiar)
+inicio_pos = periodo(dados, "Pós")[0]
 
-classificaveis = comp_upa[comp_upa["sentido"] != 0]
-n_mel = int((classificaveis["status"] == "Melhorou").sum())
-n_pio = int((classificaveis["status"] == "Piorou").sum())
-n_est = int((classificaveis["status"] == "Estável").sum())
+titulo_sel = "Todas as UPAs (média da rede)" if upa_sel == TODAS else \
+    f"{upa_sel} · {dados_sel['porte'].iloc[0]}"
+st.markdown(f"<h2 style='margin:.6rem 0 0'>{titulo_sel}</h2>", unsafe_allow_html=True)
 
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("UPAs analisadas", comp_upa["upa"].nunique())
-c2.metric("Indicadores que melhoraram", n_mel, help="Soma de todas as combinações UPA × indicador classificáveis")
-c3.metric("Indicadores que pioraram", n_pio)
-c4.metric("Estáveis", n_est)
+cls = comp_sel[comp_sel["sentido"] != 0]
+n_mel, n_pio, n_est = (int((cls["status"] == s).sum()) for s in ("Melhorou", "Piorou", "Estável"))
+c1, c2, c3 = st.columns(3)
+c1.metric("Indicadores que melhoraram", n_mel)
+c2.metric("Indicadores que pioraram", n_pio)
+c3.metric("Estáveis", n_est)
+st.caption(f"Contagem feita sobre os {len(cls)} indicadores que têm sentido definido "
+           "(meta no 51º Termo Aditivo, ou os que você marcou como melhora/piora na barra lateral).")
 
-aba_geral, aba_upa, aba_ind, aba_dados = st.tabs(["Visão geral", "Por UPA", "Por indicador", "Tabela completa"])
+aba_ind, aba_comp, aba_dados = st.tabs(["Indicadores", "Comparar UPAs", "Tabela completa"])
 
 # ----------------------------------------------------------------------------
-# Visão geral
+# Indicadores: cards agrupados + evolução mensal
 # ----------------------------------------------------------------------------
-with aba_geral:
-    st.subheader("Rede: média de todas as UPAs selecionadas")
-    rede = comp_rede.copy()
-    cols = st.columns(4)
-    for i, (_, r) in enumerate(rede.iterrows()):
-        cor = COR_STATUS[r["status"]]
-        cols[i % 4].markdown(
-            f"""<div style="border:1px solid rgba(128,128,128,.25);border-left:5px solid {cor};
-            border-radius:6px;padding:10px 12px;margin-bottom:10px">
-            <div style="font-size:.8rem;opacity:.75">{r['indicador']}</div>
-            <div style="font-size:1.25rem;font-weight:600">{fmt_valor(r['Pós'], r['ind'])}
-              <span style="font-size:.85rem;font-weight:400;opacity:.7">antes {fmt_valor(r['Antes'], r['ind'])}</span></div>
-            <div style="color:{cor};font-weight:600;font-size:.85rem">{ICONE[r['status']]} · {fmt_var(r['var_pct'], r['ind'])}</div>
-            </div>""", unsafe_allow_html=True)
-    st.caption("Volumes: média por dia. Tempos: média do período em horas e minutos. % de GAEs: classificadas ÷ abertas no período.")
+GRUPOS = [
+    ("Atendimentos (média por dia)", ["producao", "total", "medico", "urgencia", "acolhimento"]),
+    ("Tempo entre a classificação de risco e o 1º atendimento médico", ["t_laranja", "t_amarelo", "t_verde"]),
+    ("Classificação de risco (GAEs)", ["gae_pct", "gae_ab", "gae_cl"]),
+    ("Exames (média por dia)", ["exames", "rx", "ecg"]),
+]
 
-    st.subheader("Mapa de melhoras e pioras por UPA")
-    mapa = comp_upa.pivot_table(index="upa", columns="ind", values="score")
-    texto = comp_upa.assign(t=comp_upa.apply(lambda r: fmt_var(r["var_pct"], r["ind"]), axis=1)) \
-        .pivot_table(index="upa", columns="ind", values="t", aggfunc="first")
-    ordem_cols = [k for k in ORDEM if k in mapa.columns]
-    ordem_upas = classificaveis.assign(s=classificaveis["score"].clip(-50, 50)).groupby("upa")["s"].mean() \
-        .reindex(mapa.index).fillna(0).sort_values().index.tolist()
-    mapa, texto = mapa.loc[ordem_upas, ordem_cols], texto.loc[ordem_upas, ordem_cols]
-    fig = go.Figure(go.Heatmap(
-        z=mapa.clip(-40, 40).values, x=[NOME[k] for k in ordem_cols], y=ordem_upas,
-        text=texto.values, texttemplate="%{text}", textfont={"size": 11},
-        colorscale=[[0, VERMELHO], [0.5, "#EEF0F3"], [1, VERDE]], zmin=-40, zmax=40,
-        showscale=False, hovertemplate="%{y}<br>%{x}<br>Variação: %{text}<extra></extra>", xgap=2, ygap=2))
-    fig.update_layout(height=60 + 36 * len(ordem_upas), margin=dict(l=10, r=10, t=10, b=10),
-                      xaxis=dict(side="top", tickangle=-30), plot_bgcolor="rgba(0,0,0,0)")
-    st.plotly_chart(fig, width="stretch")
-    st.caption("Verde = melhorou · vermelho = piorou · cinza = neutro ou estável. "
-               "Os números mostram a variação do Pós em relação ao Antes. UPAs ordenadas de cima para baixo, da que mais melhorou para a que mais piorou.")
 
-    st.subheader("Saldo por UPA")
-    saldo = classificaveis.groupby(["upa", "status"]).size().unstack(fill_value=0)
-    for s in ("Melhorou", "Piorou", "Estável"):
-        if s not in saldo:
-            saldo[s] = 0
-    saldo["saldo"] = saldo["Melhorou"] - saldo["Piorou"]
-    saldo = saldo.sort_values("saldo")
+def card(r):
+    cor = COR_STATUS[r["status"]]
+    return f"""<div style="border:1px solid rgba(128,128,128,.25);border-top:4px solid {cor};border-radius:8px;
+        padding:12px 14px;margin-bottom:12px;min-height:150px">
+        <div style="font-size:.82rem;opacity:.8">{r['indicador']}</div>
+        <div style="font-size:1.6rem;font-weight:700;line-height:1.3">{fmt_valor(r['Pós'], r['ind'])}</div>
+        <div style="font-size:.82rem;opacity:.7">antes do projeto: {fmt_valor(r['Antes'], r['ind'])}</div>
+        <div style="margin-top:4px;color:{cor};font-weight:700;font-size:.9rem">{ICONE[r['status']]} · {fmt_var(r['var_pct'], r['ind'])}</div>
+        </div>"""
+
+
+with aba_ind:
+    st.caption("O número grande é o valor depois do projeto (Pós). Embaixo, o valor de antes e a variação.")
+    por_ind = comp_sel.set_index("ind")
+    for titulo, chaves in GRUPOS:
+        st.markdown(f"**{titulo}**")
+        chaves = [k for k in chaves if k in por_ind.index]
+        cols = st.columns(len(chaves) if len(chaves) > 3 else 3)
+        for col, k in zip(cols, chaves):
+            r = por_ind.loc[k].copy()
+            r["ind"] = k
+            col.markdown(card(r), unsafe_allow_html=True)
+
+    st.markdown("**Evolução mês a mês**")
+    ind_sel = st.selectbox("Indicador", ORDEM, format_func=NOME.get, key="ind_evol")
+    com_mes = lambda df: df.assign(mes=df["data"].dt.to_period("M").dt.to_timestamp())
+    serie = agregar(com_mes(dados_sel), ["mes"])
+    serie = serie[serie["ind"] == ind_sel].sort_values("mes")
     fig = go.Figure()
-    fig.add_bar(y=saldo.index, x=-saldo["Piorou"], name="Piorou", orientation="h", marker_color=VERMELHO,
-                customdata=saldo["Piorou"], hovertemplate="%{y}: %{customdata} pioraram<extra></extra>")
-    fig.add_bar(y=saldo.index, x=saldo["Melhorou"], name="Melhorou", orientation="h", marker_color=VERDE,
-                hovertemplate="%{y}: %{x} melhoraram<extra></extra>")
-    fig.update_layout(barmode="relative", height=60 + 30 * len(saldo), margin=dict(l=10, r=10, t=10, b=10),
-                      legend=dict(orientation="h", y=1.08), xaxis=dict(title="nº de indicadores", zeroline=True))
-    st.plotly_chart(fig, width="stretch")
-    if sentido_volume == 0:
-        st.caption("O saldo considera os indicadores com meta no 51º Termo Aditivo: atendimentos médicos + urgência, "
-                   "% de GAEs classificadas e tempos médios por cor. Os demais aparecem só como variação.")
-
-# ----------------------------------------------------------------------------
-# Por UPA
-# ----------------------------------------------------------------------------
-mensal = agregar(dados.assign(mes=dados["data"].dt.to_period("M").dt.to_timestamp()), ["upa", "mes"])
-inicio_pos = p_ini
-
-with aba_upa:
-    upa = st.selectbox("UPA", sorted(comp_upa["upa"].unique()))
-    t = comp_upa[comp_upa["upa"] == upa]
-    st.caption(f"{t['porte'].iloc[0]}")
-    k1, k2, k3 = st.columns(3)
-    tc = t[t["sentido"] != 0]
-    k1.metric("Melhoraram", int((tc["status"] == "Melhorou").sum()))
-    k2.metric("Pioraram", int((tc["status"] == "Piorou").sum()))
-    k3.metric("Estáveis", int((tc["status"] == "Estável").sum()))
-
-    tabela = pd.DataFrame({
-        "Indicador": t["indicador"],
-        "Antes": [fmt_valor(v, k) for v, k in zip(t["Antes"], t["ind"])],
-        "Pós": [fmt_valor(v, k) for v, k in zip(t["Pós"], t["ind"])],
-        "Variação": [fmt_var(v, k) for v, k in zip(t["var_pct"], t["ind"])],
-        "Situação": t["status"].map(ICONE),
-    })
-
-    def cor_linha(row):
-        cor = COR_STATUS[[k for k, v in ICONE.items() if v == row["Situação"]][0]]
-        return [""] * 4 + [f"color:{cor};font-weight:600"]
-
-    st.dataframe(tabela.style.apply(cor_linha, axis=1), hide_index=True, width="stretch",
-                 height=(len(tabela) + 1) * 35 + 3)
-
-    ind_sel = st.selectbox("Evolução mensal do indicador", ORDEM, format_func=NOME.get, key="ind_upa")
-    serie = mensal[(mensal["upa"] == upa) & (mensal["ind"] == ind_sel)].sort_values("mes")
-    rede_m = agregar(dados.assign(mes=dados["data"].dt.to_period("M").dt.to_timestamp()), ["mes"])
-    rede_m = rede_m[rede_m["ind"] == ind_sel].sort_values("mes")
-    fig = go.Figure()
-    fig.add_scatter(x=rede_m["mes"], y=rede_m["valor"], name="Média da rede", mode="lines",
-                    line=dict(color=CINZA, dash="dot"))
-    fig.add_scatter(x=serie["mes"], y=serie["valor"], name=upa, mode="lines+markers",
-                    line=dict(color=AZUL, width=3))
+    if upa_sel != TODAS:
+        rede_m = agregar(com_mes(dados), ["mes"])
+        rede_m = rede_m[rede_m["ind"] == ind_sel].sort_values("mes")
+        fig.add_scatter(x=rede_m["mes"], y=rede_m["valor"], name="Média de todas as UPAs", mode="lines",
+                        line=dict(color=CINZA, dash="dot"))
+    fig.add_scatter(x=serie["mes"], y=serie["valor"], name=upa_sel if upa_sel != TODAS else "Média de todas as UPAs",
+                    mode="lines+markers+text", line=dict(color=AZUL, width=3),
+                    text=[fmt_valor(v, ind_sel) for v in serie["valor"]], textposition="top center")
     if inicio_pos is not None:
-        fig.add_vline(x=inicio_pos, line_dash="dash", line_color=VERDE)
-        fig.add_annotation(x=inicio_pos, y=1, yref="paper", text="Início do projeto", showarrow=False,
-                           xanchor="left", font=dict(color=VERDE))
+        fig.add_vline(x=inicio_pos, line_dash="dash", line_color=IG_LARANJA)
+        fig.add_annotation(x=inicio_pos, y=1.05, yref="paper", text="Início do projeto", showarrow=False,
+                           xanchor="left", font=dict(color=IG_LARANJA))
     unid = {"tempo": "minutos", "pct": "%", "volume": "média por dia"}[INDICADORES[ind_sel][1]]
-    fig.update_layout(height=380, margin=dict(l=10, r=10, t=30, b=10), yaxis_title=unid,
+    fig.update_layout(height=380, margin=dict(l=10, r=10, t=40, b=10), yaxis_title=unid,
                       legend=dict(orientation="h", y=-0.15), xaxis=dict(tickformat="%b/%y"))
     st.plotly_chart(fig, width="stretch")
-    st.caption("Junho mistura os dois períodos (o projeto começou durante o mês).")
+    st.caption("Cada ponto é a média do mês. A linha laranja marca o início do projeto (junho mistura as duas fases).")
 
 # ----------------------------------------------------------------------------
-# Por indicador
+# Comparar UPAs
 # ----------------------------------------------------------------------------
-with aba_ind:
-    ind = st.selectbox("Indicador", ORDEM, format_func=NOME.get, key="ind_tab")
-    t = comp_upa[comp_upa["ind"] == ind].sort_values("score" if INDICADORES[ind][2] or sentido_volume else "var_pct")
-    r = comp_rede[comp_rede["ind"] == ind].iloc[0]
-    st.markdown(f"**Rede:** antes {fmt_valor(r['Antes'], ind)} → pós {fmt_valor(r['Pós'], ind)} "
-                f"(<span style='color:{COR_STATUS[r['status']]}'>{ICONE[r['status']]}, {fmt_var(r['var_pct'], ind)}</span>)",
-                unsafe_allow_html=True)
+with aba_comp:
+    st.markdown("**Resumo por UPA**")
+    st.caption("Para cada UPA: quantos indicadores melhoraram e pioraram, e qual foi a maior melhora e a maior piora.")
+    linhas = []
+    for (upa, porte), t in comp_upa.groupby(["upa", "porte"]):
+        tc = t[(t["sentido"] != 0) & t["score"].notna()]
+        mel, pio = tc[tc["status"] == "Melhorou"], tc[tc["status"] == "Piorou"]
+        top = mel.loc[mel["score"].idxmax()] if not mel.empty else None
+        pior = pio.loc[pio["score"].idxmin()] if not pio.empty else None
+        linhas.append({
+            "UPA": upa, "Porte": porte,
+            "Melhoraram": len(mel), "Pioraram": len(pio), "Estáveis": int((tc["status"] == "Estável").sum()),
+            "Maior melhora": f"{top['indicador']} ({fmt_var(top['var_pct'], top['ind'])})" if top is not None else "—",
+            "Maior piora": f"{pior['indicador']} ({fmt_var(pior['var_pct'], pior['ind'])})" if pior is not None else "—",
+        })
+    resumo = pd.DataFrame(linhas)
+    resumo = resumo.assign(_s=resumo["Melhoraram"] - resumo["Pioraram"]).sort_values(["_s", "Melhoraram"], ascending=False).drop(columns="_s")
+
+    def cores(col):
+        if col.name == "Melhoraram":
+            return [f"color:{VERDE};font-weight:700"] * len(col)
+        if col.name == "Pioraram":
+            return [f"color:{VERMELHO};font-weight:700"] * len(col)
+        return [""] * len(col)
+
+    st.dataframe(resumo.style.apply(cores), hide_index=True, width="stretch", height=(len(resumo) + 1) * 35 + 3)
+
+    st.markdown("**Um indicador em todas as UPAs**")
+    ind = st.selectbox("Indicador", ORDEM, format_func=NOME.get, key="ind_comp")
+    t = comp_upa[comp_upa["ind"] == ind].sort_values("Pós")
     fig = go.Figure()
-    fig.add_bar(y=t["upa"], x=t["Antes"], name="Antes", orientation="h", marker_color="#B8C2CE",
+    fig.add_bar(y=t["upa"], x=t["Antes"], name="Antes do projeto", orientation="h", marker_color="#B8C2CE",
                 text=[fmt_valor(v, ind) for v in t["Antes"]], textposition="outside")
-    fig.add_bar(y=t["upa"], x=t["Pós"], name="Pós", orientation="h",
+    fig.add_bar(y=t["upa"], x=t["Pós"], name="Depois do projeto", orientation="h",
                 marker_color=[COR_STATUS[s] if s in ("Melhorou", "Piorou") else AZUL for s in t["status"]],
                 text=[f"{fmt_valor(v, ind)}  ({fmt_var(p, ind)})" for v, p in zip(t["Pós"], t["var_pct"])],
                 textposition="outside")
-    fig.update_layout(barmode="group", height=80 + 52 * len(t), margin=dict(l=10, r=40, t=10, b=10),
+    fig.update_layout(barmode="group", height=80 + 52 * len(t), margin=dict(l=10, r=60, t=10, b=10),
                       legend=dict(orientation="h", y=1.04))
     st.plotly_chart(fig, width="stretch")
-    st.caption("A barra do Pós fica verde quando a UPA melhorou, vermelha quando piorou e azul quando é neutra ou estável.")
+    st.caption("Barra cinza = antes do projeto. Barra colorida = depois: verde se melhorou, vermelha se piorou, azul se ficou estável ou não tem meta.")
 
 # ----------------------------------------------------------------------------
 # Tabela completa
