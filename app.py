@@ -413,13 +413,26 @@ titulo_sel = "Todas as UPAs (média da rede)" if upa_sel == TODAS else \
 st.markdown(f"<h2 style='margin:.6rem 0 0'>{titulo_sel}</h2>", unsafe_allow_html=True)
 
 cls = comp_sel[comp_sel["sentido"] != 0]
-n_mel, n_pio, n_est = (int((cls["status"] == s).sum()) for s in ("Melhorou", "Piorou", "Estável"))
+
+
+def caixa_resumo(titulo, status, cor):
+    itens = cls[cls["status"] == status]
+    lista = "".join(
+        f"<li style='margin:2px 0'>{r['indicador']} <b style='color:{cor}'>{fmt_var(r['var_pct'], r['ind'])}</b></li>"
+        for _, r in itens.iterrows()) or "<li style='opacity:.6;list-style:none'>nenhum</li>"
+    return f"""<div style="border:1px solid rgba(128,128,128,.25);border-top:4px solid {cor};border-radius:8px;padding:12px 14px;height:100%">
+        <div style="font-size:.85rem;opacity:.8">{titulo}</div>
+        <div style="font-size:2rem;font-weight:700;color:{cor};line-height:1.2">{len(itens)}</div>
+        <ul style="margin:6px 0 0;padding-left:18px;font-size:.85rem">{lista}</ul></div>"""
+
+
 c1, c2, c3 = st.columns(3)
-c1.metric("Indicadores que melhoraram", n_mel)
-c2.metric("Indicadores que pioraram", n_pio)
-c3.metric("Estáveis", n_est)
-st.caption(f"Contagem feita sobre os {len(cls)} indicadores que têm sentido definido "
-           "(meta no 51º Termo Aditivo, ou os que você marcou como melhora/piora na barra lateral).")
+c1.markdown(caixa_resumo("Melhoraram", "Melhorou", VERDE), unsafe_allow_html=True)
+c2.markdown(caixa_resumo("Pioraram", "Piorou", VERMELHO), unsafe_allow_html=True)
+c3.markdown(caixa_resumo("Estáveis", "Estável", CINZA), unsafe_allow_html=True)
+st.caption(f"Considera os {len(cls)} indicadores com meta no 51º Termo Aditivo (atendimentos médicos + urgência, "
+           "% de GAEs classificadas e tempos por cor). Acolhimento, exames e GAEs abertas/classificadas não têm meta: "
+           "aparecem nos cards abaixo como \"Aumentou\" ou \"Diminuiu\", a menos que você mude isso na barra lateral.")
 
 aba_ind, aba_comp, aba_dados = st.tabs(["Indicadores", "Comparar UPAs", "Tabela completa"])
 
