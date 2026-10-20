@@ -375,8 +375,19 @@ p_ini, p_fim, p_dias = periodo("Pós")
 f = lambda d: d.strftime("%d/%m/%Y") if d is not None else "—"
 
 logo_a, _, logo_b = st.columns([2, 5, 1.2])
-logo_a.image(os.path.join(ASSETS, "logo_igesdf.png"), width=230)
-logo_b.image(os.path.join(ASSETS, "logo_upa24h.png"), width=130)
+def achar_logo(nome):
+    """Procura a logo em assets/ ou solta na raiz do repositório."""
+    for pasta in (ASSETS, os.path.dirname(os.path.abspath(__file__))):
+        caminho = os.path.join(pasta, nome)
+        if os.path.exists(caminho):
+            return caminho
+    return None
+
+
+for coluna, nome, largura in ((logo_a, "logo_igesdf.png", 230), (logo_b, "logo_upa24h.png", 130)):
+    caminho = achar_logo(nome)
+    if caminho:
+        coluna.image(caminho, width=largura)
 st.markdown(
     f"""<div style="display:grid;grid-template-columns:3fr 2fr 2fr 1fr 2fr;height:6px;border-radius:3px;overflow:hidden;margin:4px 0 8px">
     <div style="background:{IG_AZUL}"></div><div style="background:{IG_CIANO}"></div><div style="background:{IG_LIMAO}"></div>
