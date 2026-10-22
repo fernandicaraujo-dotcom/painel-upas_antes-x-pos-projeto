@@ -319,16 +319,28 @@ if dados.empty:
     st.error("A planilha não tem o formato esperado (abas mensais com as colunas Data, Fase, Indicador e as UPAs).")
     st.stop()
 
+FILTROS = ["f_periodo", "f_recorte", "f_dias", "f_porte", "f_upa", "f_volume", "f_limiar", "ind_evol", "ind_comp"]
+
+
+def limpar_filtros():
+    """Volta todos os filtros ao padrão (período completo, todos os dias, portes e UPAs, critérios originais).
+    A fonte dos dados (link ou arquivo enviado) é mantida."""
+    for k in FILTROS:
+        st.session_state.pop(k, None)
+
+
+st.sidebar.button("🧹 Limpar filtros", on_click=limpar_filtros, width="stretch", type="primary",
+                  help="Volta período, recorte, dias, porte, UPA, critérios e os indicadores escolhidos nas abas ao padrão.")
 st.sidebar.header("Período")
 d_min, d_max = dados["data"].min().date(), dados["data"].max().date()
 periodo_sel = st.sidebar.date_input("Datas analisadas", value=(d_min, d_max), min_value=d_min, max_value=d_max,
-                                    format="DD/MM/YYYY",
+                                    format="DD/MM/YYYY", key="f_periodo",
                                     help="O Antes e o Pós passam a usar só os dias dentro deste intervalo.")
 if isinstance(periodo_sel, (list, tuple)) and len(periodo_sel) == 2:
     dados = dados[(dados["data"].dt.date >= periodo_sel[0]) & (dados["data"].dt.date <= periodo_sel[1])]
-recorte = st.sidebar.radio("Recorte do Pós", ["Todo", "Últimos 30 dias", "Últimos 7 dias"], horizontal=True,
+recorte = st.sidebar.radio("Recorte do Pós", ["Todo", "Últimos 30 dias", "Últimos 7 dias"], horizontal=True, key="f_recorte",
                            help="Compara só os últimos dias da planilha (todos no Pós) com a base do Antes.")
-tipo_dia = st.sidebar.radio("Dias", ["Todos", "Dias úteis", "Finais de semana"], horizontal=True,
+tipo_dia = st.sidebar.radio("Dias", ["Todos", "Dias úteis", "Finais de semana"], horizontal=True, key="f_dias",
                             help="Finais de semana = sábados e domingos. Feriados não são separados.")
 n_rec = {"Todo": 0, "Últimos 30 dias": 30, "Últimos 7 dias": 7}[recorte]
 if n_rec:
@@ -349,14 +361,14 @@ if dados["fase"].nunique() < 2:
 
 st.sidebar.header("UPA")
 portes = sorted(dados["porte"].unique())
-porte_sel = st.sidebar.multiselect("Porte", portes, default=portes)
+porte_sel = st.sidebar.multiselect("Porte", portes, default=portes, key="f_porte")
 dados = dados[dados["porte"].isin(porte_sel)]
 if dados.empty:
     st.warning("Selecione ao menos um porte.")
     st.stop()
 
 TODAS = "Todas as UPAs"
-upa_sel = st.sidebar.selectbox("Ver indicadores de", [TODAS] + sorted(dados["upa"].unique()),
+upa_sel = st.sidebar.selectbox("Ver indicadores de", [TODAS] + sorted(dados["upa"].unique()), key="f_upa",
                                help="Os cards e o gráfico mudam conforme a UPA e o período escolhidos.")
 dados_sel = dados if upa_sel == TODAS else dados[dados["upa"] == upa_sel]
 
@@ -364,11 +376,11 @@ dados_sel = dados if upa_sel == TODAS else dados[dados["upa"] == upa_sel]
 st.sidebar.header("Critérios de comparação")
 opc_volume = st.sidebar.radio(
     "Indicadores sem meta no contrato (acolhimento, exames, RX, ECG, GAEs abertas/classificadas): aumentar é…",
-    ["Só variação (neutro)", "Melhora", "Piora"], index=0,
+    ["Só variação (neutro)", "Melhora", "Piora"], index=0, key="f_volume",
     help="Pelas metas das UPAs no 51º Termo Aditivo: atendimentos médicos + urgência e % de GAEs "
          "classificadas, aumentar é melhora. Tempos médios por cor, diminuir é melhora.")
 sentido_volume = {"Só variação (neutro)": 0, "Melhora": 1, "Piora": -1}[opc_volume]
-limiar = st.sidebar.slider("Variação mínima para considerar mudança (%)", 0.0, 20.0, 5.0, 0.5,
+limiar = st.sidebar.slider("Variação mínima para considerar mudança (%)", 0.0, 20.0, 5.0, 0.5, key="f_limiar",
                            help="Variações menores que esse valor aparecem como 'Estável'.")
 # ----------------------------------------------------------------------------
 # Cabeçalho
