@@ -322,18 +322,29 @@ if dados.empty:
 FILTROS = ["f_periodo", "f_recorte", "f_dias", "f_porte", "f_upa", "f_volume", "f_limiar", "ind_evol", "ind_comp"]
 
 
+PADRAO_FIXO = {"f_recorte": "Todo", "f_dias": "Todos", "f_upa": "Todas as UPAs", "f_volume": "Só variação (neutro)",
+               "f_limiar": 5.0, "ind_evol": ORDEM[0], "ind_comp": ORDEM[0]}
+
+
 def limpar_filtros():
     """Volta todos os filtros ao padrão (período completo, todos os dias, portes e UPAs, critérios originais).
+    Grava o valor padrão em cada filtro (só apagar não basta: o navegador devolvia o último valor).
     A fonte dos dados (link ou arquivo enviado) é mantida."""
+    padrao = {**PADRAO_FIXO, **st.session_state.get("_padrao_dados", {})}
     for k in FILTROS:
-        st.session_state.pop(k, None)
+        if k in padrao:
+            st.session_state[k] = padrao[k]
 
 
 st.sidebar.button("🧹 Limpar filtros", on_click=limpar_filtros, width="stretch", type="primary",
                   help="Volta período, recorte, dias, porte, UPA, critérios e os indicadores escolhidos nas abas ao padrão.")
 st.sidebar.header("Período")
 d_min, d_max = dados["data"].min().date(), dados["data"].max().date()
-periodo_sel = st.sidebar.date_input("Datas analisadas", value=(d_min, d_max), min_value=d_min, max_value=d_max,
+todos_portes = sorted(dados["porte"].unique())
+st.session_state["_padrao_dados"] = {"f_periodo": (d_min, d_max), "f_porte": todos_portes}
+for _k, _v in {**PADRAO_FIXO, **st.session_state["_padrao_dados"]}.items():
+    st.session_state.setdefault(_k, _v)
+periodo_sel = st.sidebar.date_input("Datas analisadas", min_value=d_min, max_value=d_max,
                                     format="DD/MM/YYYY", key="f_periodo",
                                     help="O Antes e o Pós passam a usar só os dias dentro deste intervalo.")
 if isinstance(periodo_sel, (list, tuple)) and len(periodo_sel) == 2:
@@ -361,13 +372,16 @@ if dados["fase"].nunique() < 2:
 
 st.sidebar.header("UPA")
 portes = sorted(dados["porte"].unique())
-porte_sel = st.sidebar.multiselect("Porte", portes, default=portes, key="f_porte")
+st.session_state["f_porte"] = [p for p in st.session_state["f_porte"] if p in portes]
+porte_sel = st.sidebar.multiselect("Porte", portes, key="f_porte")
 dados = dados[dados["porte"].isin(porte_sel)]
 if dados.empty:
     st.warning("Selecione ao menos um porte.")
     st.stop()
 
 TODAS = "Todas as UPAs"
+if st.session_state["f_upa"] not in [TODAS] + sorted(dados["upa"].unique()):
+    st.session_state["f_upa"] = TODAS
 upa_sel = st.sidebar.selectbox("Ver indicadores de", [TODAS] + sorted(dados["upa"].unique()), key="f_upa",
                                help="Os cards e o gráfico mudam conforme a UPA e o período escolhidos.")
 dados_sel = dados if upa_sel == TODAS else dados[dados["upa"] == upa_sel]
@@ -376,11 +390,11 @@ dados_sel = dados if upa_sel == TODAS else dados[dados["upa"] == upa_sel]
 st.sidebar.header("Critérios de comparação")
 opc_volume = st.sidebar.radio(
     "Indicadores sem meta no contrato (acolhimento, exames, RX, ECG, GAEs abertas/classificadas): aumentar é…",
-    ["Só variação (neutro)", "Melhora", "Piora"], index=0, key="f_volume",
+    ["Só variação (neutro)", "Melhora", "Piora"], key="f_volume",
     help="Pelas metas das UPAs no 51º Termo Aditivo: atendimentos médicos + urgência e % de GAEs "
          "classificadas, aumentar é melhora. Tempos médios por cor, diminuir é melhora.")
 sentido_volume = {"Só variação (neutro)": 0, "Melhora": 1, "Piora": -1}[opc_volume]
-limiar = st.sidebar.slider("Variação mínima para considerar mudança (%)", 0.0, 20.0, 5.0, 0.5, key="f_limiar",
+limiar = st.sidebar.slider("Variação mínima para considerar mudança (%)", 0.0, 20.0, step=0.5, key="f_limiar",
                            help="Variações menores que esse valor aparecem como 'Estável'.")
 # ----------------------------------------------------------------------------
 # Cabeçalho
